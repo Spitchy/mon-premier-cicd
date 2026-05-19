@@ -1,9 +1,9 @@
 # mon-premier-cicd
 
-[![CI Pipeline](https://github.com/VOTRE_USERNAME/mon-premier-cicd/actions/workflows/ci.yml/badge.svg)](https://github.com/VOTRE_USERNAME/mon-premier-cicd/actions/workflows/ci.yml)
+[![CI — Lint, Tests & Coverage](https://github.com/VOTRE_USERNAME/mon-premier-cicd/actions/workflows/ci.yml/badge.svg)](https://github.com/VOTRE_USERNAME/mon-premier-cicd/actions/workflows/ci.yml)
 
-> Premier pipeline CI/CD avec GitHub Actions, Node.js, Jest et ESLint.  
-> M1 Expert Dev Full Stack — Séance 1 CI/CD
+> Pipeline CI/CD avancé — Jobs parallèles, matrice Node.js, cache npm, artefacts  
+> M1 Expert Dev Full Stack — Séance 2 CI/CD
 
 ---
 
@@ -13,14 +13,14 @@
 mon-premier-cicd/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml          # Pipeline GitHub Actions
+│       └── ci.yml              # Pipeline GitHub Actions (Séance 2)
 ├── src/
-│   ├── calculator.js       # Code source
+│   ├── calculator.js           # Code source
 │   └── __tests__/
 │       └── calculator.test.js  # Tests Jest
-├── .eslintrc.json          # Configuration ESLint
+├── .eslintrc.json              # Configuration ESLint (+ règle no-var)
 ├── .gitignore
-├── package.json
+├── package.json                # + script test:ci
 └── README.md
 ```
 
@@ -29,55 +29,79 @@ mon-premier-cicd/
 ```bash
 git clone https://github.com/VOTRE_USERNAME/mon-premier-cicd.git
 cd mon-premier-cicd
-npm ci
+npm install
 ```
 
-## Lancer les tests
+## Scripts disponibles
 
 ```bash
-npm test
+npm test          # Jest avec couverture (local)
+npm run test:ci   # Jest mode strict CI (utilisé dans le pipeline)
+npm run lint      # ESLint
+npm run lint:fix  # Correction automatique ESLint
 ```
 
-## Lancer le lint
+## Architecture du pipeline (Séance 2)
 
+```
+PUSH / PR
+│
+├──▶ 🔍 lint          (ubuntu-latest, Node 18, ~30s)
+│
+├──▶ 🧪 test (18)     (ubuntu-latest, Node 18, ~45s)  ─┐
+│                                                        ├─▶ ✅ ci-success
+└──▶ 🧪 test (20)     (ubuntu-latest, Node 20, ~45s)  ─┘
+                                                         └─▶ 🔔 notify-failure (si échec)
+```
+
+| Job | Rôle |
+|-----|------|
+| **lint** | ESLint — qualité du code |
+| **test (18)** | Jest sur Node 18 + rapport de couverture |
+| **test (20)** | Jest sur Node 20 + rapport de couverture |
+| **ci-success** | Vérifie que lint ET test sont verts |
+| **notify-failure** | Alerte Slack si échec (nécessite secret `SLACK_WEBHOOK_URL`) |
+
+## Fonctionnalités du pipeline
+
+- **Jobs parallèles** — lint et test s'exécutent en même temps
+- **Matrice Node.js 18 + 20** — 2 runs simultanés avec `fail-fast: false`
+- **Cache npm** — `node_modules` mis en cache entre les runs (~20-35s économisés)
+- **Artefacts** — rapports de couverture conservés 14 jours (`coverage-node-18`, `coverage-node-20`)
+- **Step Summary** — tableau de couverture visible dans l'onglet Summary de GitHub Actions
+- **PR Comment** — commentaire automatique avec la couverture sur chaque Pull Request
+- **Notification Slack** — alerte automatique en cas d'échec (configurer `SLACK_WEBHOOK_URL` dans Settings → Secrets)
+
+## Cycle Red / Green — Séance 2
+
+### Tester needs: (partie 3.1)
 ```bash
-npm run lint
+# Dans src/calculator.js, ajouter :
+var unused_variable = 'je ne suis jamais utilisée';
+# → lint ✗  |  test ✓  |  ci-success ✗  (needs bloque tout)
+
+# Corriger :
+# Supprimer la ligne var
+git add . && git commit -m "fix: suppression variable inutilisée" && git push
 ```
 
-## Pipeline CI/CD
-
-Le pipeline GitHub Actions s'exécute automatiquement à chaque `git push` sur `main` et à chaque Pull Request.
-
-### Étapes du pipeline
-
-| Job | Étapes | Description |
-|-----|--------|-------------|
-| **lint** | checkout → setup-node → npm ci → eslint | Vérifie la qualité du code |
-| **test (Node 18)** | checkout → setup-node → npm ci → jest | Tests sur Node.js 18 + couverture |
-| **test (Node 20)** | checkout → setup-node → npm ci → jest | Tests sur Node.js 20 + couverture |
-
-Les jobs `lint` et `test` s'exécutent **en parallèle** (Bonus 4.1).  
-Les tests tournent sur **Node.js 18 ET 20** simultanément (Bonus 4.2).  
-Un **seuil de couverture de 80%** est configuré — le pipeline échoue en dessous (Bonus 4.3).
-
-## Cycle Red / Green
-
-Pour tester que le pipeline bloque bien les régressions :
-
+### Tester fail-fast: false (partie 3.2)
 ```bash
-# 1. Introduire un bug volontaire dans src/calculator.js
-#    Changer : return a + b  →  return a - b
+# Dans calculator.test.js, ajouter :
+# test('version Node.js', () => {
+#   expect(parseInt(process.version.slice(1))).toBeLessThan(20);
+# });
+# → test(18) ✓  |  test(20) ✗  → les DEUX rapports sont visibles
 
-# 2. Pousser → pipeline passe au rouge ✗
-git add . && git commit -m "test: bug volontaire" && git push
-
-# 3. Corriger le bug
-#    Remettre : return a + b
-
-# 4. Pousser → pipeline repasse au vert ✓
-git add . && git commit -m "fix: correction du bug" && git push
+# Supprimer le test ensuite
 ```
+
+## Branch protection (Bonus 5.1)
+
+Pour bloquer les merges si le CI est rouge :  
+`Repo → Settings → Branches → Add rule → main`  
+☑ Require status checks: **✅ CI complet**
 
 ---
 
-> **Important** : remplacez `VOTRE_USERNAME` dans le badge en haut de ce fichier par votre vrai nom d'utilisateur GitHub.
+> **Important** : remplacez `VOTRE_USERNAME` dans le badge ci-dessus par votre vrai username GitHub.
