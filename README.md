@@ -2,106 +2,102 @@
 
 [![CI — Lint, Tests & Coverage](https://github.com/VOTRE_USERNAME/mon-premier-cicd/actions/workflows/ci.yml/badge.svg)](https://github.com/VOTRE_USERNAME/mon-premier-cicd/actions/workflows/ci.yml)
 
-> Pipeline CI/CD avancé — Jobs parallèles, matrice Node.js, cache npm, artefacts  
-> M1 Expert Dev Full Stack — Séance 2 CI/CD
+> Pipeline CI/CD professionnel — 4 jobs parallèles, matrix Node 18/20, composite action, reusable workflow  
+> M1 Expert Dev Full Stack — Séance 4 CI/CD
 
 ---
 
-## Structure du projet
+## Architecture du pipeline
+
+```
+PUSH (sur src/, package*.json, .github/)
+│
+├──▶ 🔍 lint         (ubuntu, Node 18, ~25s)  ─┐
+│                                               │
+├──▶ 🧪 test (18)    (ubuntu, ~35s)            ├──▶ 📊 report (~10s)
+│         ↑ via reusable workflow              │
+└──▶ 🧪 test (20)    (ubuntu, ~35s)            ─┘
+
+Temps total : MAX(25, 35) + 10 = ~45s  vs  ~105s séquentiel → gain ~57%
+```
+
+| Job | Rôle | Durée |
+|-----|------|-------|
+| **lint** | ESLint via composite action | ~25s |
+| **test (18)** | Jest Node 18 via reusable workflow | ~35s |
+| **test (20)** | Jest Node 20 via reusable workflow | ~35s |
+| **report** | Rapport consolidé Step Summary | ~10s |
+
+## Fonctionnalités avancées
+
+- **Composite action** — `.github/actions/setup-node-cached/` encapsule checkout + setup-node + npm ci
+- **Reusable workflow** — `.github/workflows/test-reusable.yml` paramétrable (versions, seuil)
+- **Path filters** — le pipeline ne se déclenche que si `src/`, `package*.json` ou `.github/` changent
+- **Concurrency** — annule les runs obsolètes sur la même branche (`cancel-in-progress: true`)
+- **fail-fast: false** — tous les runs de la matrix se complètent même si l'un échoue
+- **Step Summary** — tableau de couverture avec ✅/❌ par version, visible sans télécharger d'artefact
+- **Artefacts** — rapports HTML conservés 14 jours (`coverage-node-18`, `coverage-node-20`)
+
+## Structure complète
 
 ```
 mon-premier-cicd/
 ├── .github/
+│   ├── actions/
+│   │   └── setup-node-cached/
+│   │       └── action.yml          # Composite action (Challenge ultime)
 │   └── workflows/
-│       └── ci.yml              # Pipeline GitHub Actions (Séance 2)
+│       ├── ci.yml                  # Pipeline principal
+│       └── test-reusable.yml       # Reusable workflow (Challenge 3)
 ├── src/
-│   ├── calculator.js           # Code source
+│   ├── calculator.js
 │   └── __tests__/
-│       └── calculator.test.js  # Tests Jest
-├── .eslintrc.json              # Configuration ESLint (+ règle no-var)
+│       └── calculator.test.js      # 9 tests, couverture 100%
+├── .eslintrc.json
 ├── .gitignore
-├── package.json                # + script test:ci
+├── NOTES.md                        # Réponses aux expérimentations
+├── package.json
 └── README.md
 ```
 
-## Installation
+## Scripts
 
 ```bash
-git clone https://github.com/VOTRE_USERNAME/mon-premier-cicd.git
-cd mon-premier-cicd
-npm install
-```
-
-## Scripts disponibles
-
-```bash
-npm test          # Jest avec couverture (local)
-npm run test:ci   # Jest mode strict CI (utilisé dans le pipeline)
+npm test          # Jest local (sans flag CI)
+npm run test:ci   # Jest mode strict + couverture json-summary (utilisé dans le pipeline)
 npm run lint      # ESLint
-npm run lint:fix  # Correction automatique ESLint
+npm run lint:fix  # Correction automatique
 ```
 
-## Architecture du pipeline (Séance 2)
+## Expérimentations (Partie 3)
 
-```
-PUSH / PR
-│
-├──▶ 🔍 lint          (ubuntu-latest, Node 18, ~30s)
-│
-├──▶ 🧪 test (18)     (ubuntu-latest, Node 18, ~45s)  ─┐
-│                                                        ├─▶ ✅ ci-success
-└──▶ 🧪 test (20)     (ubuntu-latest, Node 20, ~45s)  ─┘
-                                                         └─▶ 🔔 notify-failure (si échec)
-```
-
-| Job | Rôle |
-|-----|------|
-| **lint** | ESLint — qualité du code |
-| **test (18)** | Jest sur Node 18 + rapport de couverture |
-| **test (20)** | Jest sur Node 20 + rapport de couverture |
-| **ci-success** | Vérifie que lint ET test sont verts |
-| **notify-failure** | Alerte Slack si échec (nécessite secret `SLACK_WEBHOOK_URL`) |
-
-## Fonctionnalités du pipeline
-
-- **Jobs parallèles** — lint et test s'exécutent en même temps
-- **Matrice Node.js 18 + 20** — 2 runs simultanés avec `fail-fast: false`
-- **Cache npm** — `node_modules` mis en cache entre les runs (~20-35s économisés)
-- **Artefacts** — rapports de couverture conservés 14 jours (`coverage-node-18`, `coverage-node-20`)
-- **Step Summary** — tableau de couverture visible dans l'onglet Summary de GitHub Actions
-- **PR Comment** — commentaire automatique avec la couverture sur chaque Pull Request
-- **Notification Slack** — alerte automatique en cas d'échec (configurer `SLACK_WEBHOOK_URL` dans Settings → Secrets)
-
-## Cycle Red / Green — Séance 2
-
-### Tester needs: (partie 3.1)
+### Tester fail-fast (3.1)
 ```bash
-# Dans src/calculator.js, ajouter :
-var unused_variable = 'je ne suis jamais utilisée';
-# → lint ✗  |  test ✓  |  ci-success ✗  (needs bloque tout)
-
-# Corriger :
-# Supprimer la ligne var
-git add . && git commit -m "fix: suppression variable inutilisée" && git push
-```
-
-### Tester fail-fast: false (partie 3.2)
-```bash
-# Dans calculator.test.js, ajouter :
-# test('version Node.js', () => {
-#   expect(parseInt(process.version.slice(1))).toBeLessThan(20);
+# Ajouter dans calculator.test.js :
+# test('node version check', () => {
+#   const major = parseInt(process.version.slice(1).split('.')[0]);
+#   expect(major).toBeLessThan(20);  // échoue sur Node 20
 # });
-# → test(18) ✓  |  test(20) ✗  → les DEUX rapports sont visibles
+git add . && git commit -m "test: échec intentionnel Node 20" && git push
 
-# Supprimer le test ensuite
+# Observer : test(18) ✓  test(20) ✗  report s'exécute quand même (if: always())
+# Puis supprimer le test et remettre fail-fast: false
 ```
 
-## Branch protection (Bonus 5.1)
+### Tester concurrency (3.2)
+```bash
+git commit --allow-empty -m "ci: test concurrency 1" && git push
+git commit --allow-empty -m "ci: test concurrency 2" && git push
+git commit --allow-empty -m "ci: test concurrency 3" && git push
+# → 2 runs "Cancelled", 1 seul va au bout
+```
 
-Pour bloquer les merges si le CI est rouge :  
-`Repo → Settings → Branches → Add rule → main`  
-☑ Require status checks: **✅ CI complet**
+### Tester path filters (Challenge 1)
+```bash
+# Modifier uniquement README.md → pipeline NE se déclenche PAS
+# Modifier src/calculator.js  → pipeline SE déclenche
+```
 
 ---
 
-> **Important** : remplacez `VOTRE_USERNAME` dans le badge ci-dessus par votre vrai username GitHub.
+> **Important** : remplacez `VOTRE_USERNAME` dans le badge par votre vrai username GitHub.

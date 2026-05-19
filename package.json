@@ -1,17 +1,19 @@
 {
   "name": "mon-premier-cicd",
   "version": "1.0.0",
-  "description": "Premier pipeline CI/CD avec GitHub Actions, Node.js, Jest et ESLint",
+  "description": "Pipeline CI/CD avancé — Jobs parallèles, matrices, artefacts",
   "main": "src/calculator.js",
   "scripts": {
-    "test": "jest --coverage",
+    "test": "jest",
     "test:ci": "jest --ci --coverage",
-    "test:watch": "jest --watch",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix"
   },
   "jest": {
-    "coverageReporters": ["text", "lcov", "json-summary"],
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js"
+    ],
     "coverageThreshold": {
       "global": {
         "branches": 80,
@@ -19,7 +21,8 @@
         "lines": 80,
         "statements": 80
       }
-    }
+    },
+    "coverageReporters": ["lcov", "text", "json-summary"]
   },
   "keywords": ["cicd", "github-actions", "nodejs"],
   "author": "",
