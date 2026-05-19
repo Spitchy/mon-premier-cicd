@@ -1,0 +1,80 @@
+name: CI Pipeline
+
+# Déclencheurs : s'exécute à chaque push et pull_request sur main
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Permet le déclenchement manuel depuis l'UI GitHub
+
+jobs:
+  # ─────────────────────────────────────────
+  # JOB 1 : Lint ESLint (bonus 4.1 — parallèle)
+  # ─────────────────────────────────────────
+  lint:
+    name: Lint ESLint
+    runs-on: ubuntu-latest
+
+    steps:
+      # Étape 1 : Télécharger le code du repo
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      # Étape 2 : Installer Node.js 18
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      # Étape 3 : Installer les dépendances (mode strict CI)
+      - name: Installation des dépendances
+        run: npm ci
+
+      # Étape 4 : Vérifier la qualité du code
+      - name: Lint ESLint
+        run: npm run lint
+
+  # ─────────────────────────────────────────
+  # JOB 2 : Tests unitaires
+  # Bonus 4.1 — parallèle avec lint
+  # Bonus 4.2 — matrice Node.js 18 + 20
+  # ─────────────────────────────────────────
+  test:
+    name: Tests unitaires (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18, 20] # Bonus 4.2 : 2 runs en parallèle !
+
+    steps:
+      # Étape 1 : Télécharger le code du repo
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      # Étape 2 : Installer la version de Node.js selon la matrice
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      # Étape 3 : Installer les dépendances
+      - name: Installation des dépendances
+        run: npm ci
+
+      # Étape 4 : Exécuter les tests avec couverture
+      # Bonus 4.3 : le seuil de couverture (80%) est configuré dans package.json
+      - name: Tests unitaires avec couverture
+        run: npm test
+
+      # Étape 5 : Archiver le rapport de couverture
+      - name: Upload rapport de couverture
+        uses: actions/upload-artifact@v4
+        if: always() # Archiver même si les tests échouent
+        with:
+          name: coverage-report-node${{ matrix.node-version }}
+          path: coverage/
+          retention-days: 7
