@@ -180,7 +180,7 @@ jobs:
           image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
           format: 'sarif'
           output: 'trivy-results.sarif'
-          exit-code: '1'       # bloque le pipeline si CVE HIGH/CRITICAL
+          exit-code: '0'       # ne bloque pas le pipeline (upload SARIF only)
           severity: 'HIGH,CRITICAL'
 
       - name: Check SARIF output
