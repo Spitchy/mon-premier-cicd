@@ -38,6 +38,9 @@ jobs:
       contents: read
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       # Challenge ultime — utilisation de la composite action
       - name: Setup Node.js (via composite action)
         uses: ./.github/actions/setup-node-cached

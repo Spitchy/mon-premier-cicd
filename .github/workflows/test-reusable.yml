@@ -23,6 +23,9 @@ jobs:
         node-version: ${{ fromJSON(inputs.node-versions) }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Setup Node.js ${{ matrix.node-version }} (via composite action)
         uses: ./.github/actions/setup-node-cached
         with:
