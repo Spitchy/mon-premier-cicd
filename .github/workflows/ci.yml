@@ -128,7 +128,7 @@ jobs:
 
       - name: Build image (chargée localement pour Trivy)
         if: steps.check_docker.outputs.has_dockerfile == 'true'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -157,7 +157,7 @@ jobs:
       - name: Rebuild image pour Trivy
         # Les artefacts Docker ne persistent pas entre jobs — on rebuild
         # (rapide grâce au cache GHA configuré dans le job build)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
