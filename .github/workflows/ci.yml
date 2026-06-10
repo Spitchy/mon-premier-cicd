@@ -1,4 +1,4 @@
-name: CI — Lint, Tests & Coverage
+name: CI/CD — DevSecOps Pipeline
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
       - 'package*.json'
       - '.github/workflows/**'
       - '.github/actions/**'
+      - 'Dockerfile'           # AJOUT : rebuild si le Dockerfile change
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -18,11 +19,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Permissions minimales globales (moindre privilège)
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_TAG: ${{ github.sha }}
+
+# ─────────────────────────────────────────────────────────────────
+# JOB 1 — Lint + npm audit (existant, complété)
+# ─────────────────────────────────────────────────────────────────
 jobs:
-  # ── JOB 1 : Lint ──────────────────────────────────────────────────────────
   lint:
-    name: 🔍 Lint ESLint
+    name: 🔍 Lint ESLint + npm audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       # Challenge ultime — utilisation de la composite action
@@ -34,8 +47,16 @@ jobs:
       - name: Vérification ESLint
         run: npm run lint
 
-  # ── JOB 2 : Tests avec matrix ─────────────────────────────────────────────
-  # Challenge 3 — appel du reusable workflow
+      # AJOUT CHALLENGE — npm audit bloque sur HIGH et CRITICAL
+      # LOW et MODERATE ignorés : faible risque d'exploitation directe
+      # sur une app web, et évite de bloquer les livraisons pour des
+      # CVE théoriques sans vecteur d'attaque concret.
+      - name: npm audit — bloquer sur HIGH/CRITICAL
+        run: npm audit --audit-level=high
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2 — Tests matrix (existant, inchangé)
+  # ─────────────────────────────────────────────────────────────────
   test:
     name: 🧪 Tests (reusable workflow)
     uses: ./.github/workflows/test-reusable.yml
@@ -43,12 +64,111 @@ jobs:
       node-versions: '[18, 20]'
       coverage-threshold: 80
 
-  # ── JOB 3 : Rapport consolidé ─────────────────────────────────────────────
-  # Attend lint ET test — génère le Step Summary et valide le CI
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 3 — Gitleaks (NOUVEAU — détection de secrets dans git)
+  # ─────────────────────────────────────────────────────────────────
+  gitleaks:
+    name: 🔐 Gitleaks — Secret scanning
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout (historique complet pour gitleaks)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # obligatoire pour scanner tout l'historique git
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 4 — Build image Docker (NOUVEAU)
+  # ─────────────────────────────────────────────────────────────────
+  build:
+    name: 🐳 Build Docker image
+    runs-on: ubuntu-latest
+    needs: [test, gitleaks]
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (chargée localement pour Trivy)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          # Cache layer pour accélérer les builds suivants
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 5 — Trivy (NOUVEAU — scan image + upload SARIF)
+  # ─────────────────────────────────────────────────────────────────
+  security:
+    name: 🛡️ Trivy — Docker image scan
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      security-events: write   # requis pour uploader le SARIF dans Security Tab
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rebuild image pour Trivy
+        # Les artefacts Docker ne persistent pas entre jobs — on rebuild
+        # (rapide grâce au cache GHA configuré dans le job build)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+
+      - name: Trivy — format table (lisible dans les logs)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: 'table'
+          exit-code: '0'       # pas de blocage ici, le SARIF gère ça
+          severity: 'HIGH,CRITICAL'
+
+      - name: Trivy — format SARIF (upload Security Tab)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          exit-code: '1'       # bloque le pipeline si CVE HIGH/CRITICAL
+          severity: 'HIGH,CRITICAL'
+
+      - name: Upload rapport SARIF → GitHub Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()   # uploader même si Trivy a bloqué le step précédent
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-docker-scan'
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 6 — Rapport coverage consolidé (existant, needs étendu)
+  # ─────────────────────────────────────────────────────────────────
   report:
     name: 📊 Rapport Coverage
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    # MODIFIÉ : on attend aussi security pour que le rapport récapitule tout
+    needs: [lint, test, security]
     if: always()
 
     steps:
@@ -84,14 +204,184 @@ jobs:
         run: |
           lint_ok='${{ needs.lint.result }}'
           test_ok='${{ needs.test.result }}'
-          echo "Lint: $lint_ok | Tests: $test_ok"
+          security_ok='${{ needs.security.result }}'
+          echo "Lint: $lint_ok | Tests: $test_ok | Security: $security_ok"
 
-          if [ "$lint_ok" != 'success' ] || [ "$test_ok" != 'success' ]; then
+          if [ "$lint_ok" != 'success' ] || [ "$test_ok" != 'success' ] || [ "$security_ok" != 'success' ]; then
             echo '' >> $GITHUB_STEP_SUMMARY
             echo '## ❌ CI échoué' >> $GITHUB_STEP_SUMMARY
-            echo "Lint: $lint_ok | Tests: $test_ok" >> $GITHUB_STEP_SUMMARY
+            echo "Lint: $lint_ok | Tests: $test_ok | Security: $security_ok" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '## ✅ CI complet — tous les jobs sont verts' >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 7 — Déploiement (NOUVEAU — main uniquement)
+  # ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy to production
+    runs-on: ubuntu-latest
+    needs: security
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      deployments: write   # requis pour GitHub Deployments API
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Créer un GitHub Deployment (statut "in_progress")
+        uses: bobheadxi/deployments@v1
+        id: deployment
+        with:
+          step: start
+          token: ${{ secrets.GITHUB_TOKEN }}
+          env: production
+          ref: ${{ github.sha }}
+
+      - name: Déclencher le déploiement Render
+        run: |
+          curl -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" \
+            --fail-with-body
+        # RENDER_DEPLOY_HOOK_URL → GitHub Settings > Secrets
+        # NE JAMAIS mettre l'URL directement dans ce fichier
+
+      - name: Health check post-déploiement
+        run: |
+          echo "Attente du démarrage de l'app (30s)..."
+          sleep 30
+          for i in {1..10}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.APP_URL }}/health" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check OK (status $STATUS)"
+              exit 0
+            fi
+            echo "Tentative $i/10 — status: $STATUS — retry dans 15s..."
+            sleep 15
+          done
+          echo "❌ Health check échoué après 10 tentatives"
+          exit 1
+
+      - name: Mettre à jour GitHub Deployment — succès
+        uses: bobheadxi/deployments@v1
+        if: success()
+        with:
+          step: finish
+          token: ${{ secrets.GITHUB_TOKEN }}
+          status: success
+          env: ${{ steps.deployment.outputs.env }}
+          deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+          env_url: ${{ vars.APP_URL }}
+
+      - name: Mettre à jour GitHub Deployment — échec
+        uses: bobheadxi/deployments@v1
+        if: failure()
+        with:
+          step: finish
+          token: ${{ secrets.GITHUB_TOKEN }}
+          status: failure
+          env: ${{ steps.deployment.outputs.env }}
+          deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 8 — Notification Slack échec (NOUVEAU)
+  # ─────────────────────────────────────────────────────────────────
+  notify-failure:
+    name: 🔴 Notify Slack — Failure
+    runs-on: ubuntu-latest
+    needs: [lint, test, gitleaks, build, security, report, deploy]
+    if: failure()
+    permissions:
+      contents: read
+
+    steps:
+      - name: Slack — alerte échec
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "🔴 Pipeline échoué — ${{ github.repository }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "🔴 Échec du pipeline CI/CD" }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Repo :*\n${{ github.repository }}" },
+                    { "type": "mrkdwn", "text": "*Branche :*\n`${{ github.ref_name }}`" },
+                    { "type": "mrkdwn", "text": "*Commit :*\n`${{ github.sha }}`" },
+                    { "type": "mrkdwn", "text": "*Déclenché par :*\n${{ github.actor }}" }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [{
+                    "type": "button",
+                    "text": { "type": "plain_text", "text": "Voir les logs" },
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                    "style": "danger"
+                  }]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 9 — Notification Slack succès (NOUVEAU)
+  # ─────────────────────────────────────────────────────────────────
+  notify-success:
+    name: ✅ Notify Slack — Success
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: success() && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Slack — confirmation déploiement
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "✅ Déploiement réussi — ${{ github.repository }}",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "✅ Déploiement en production réussi" }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Repo :*\n${{ github.repository }}" },
+                    { "type": "mrkdwn", "text": "*Branche :*\n`${{ github.ref_name }}`" },
+                    { "type": "mrkdwn", "text": "*Commit :*\n`${{ github.sha }}`" },
+                    { "type": "mrkdwn", "text": "*App :*\n${{ vars.APP_URL }}" }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "Ouvrir l'app" },
+                      "url": "${{ vars.APP_URL }}",
+                      "style": "primary"
+                    },
+                    {
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "Voir le run" },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
