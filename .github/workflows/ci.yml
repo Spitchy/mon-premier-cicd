@@ -106,12 +106,21 @@ jobs:
       - name: Check Dockerfile
         id: check_docker
         run: |
+          pwd
+          ls -la
           if [ -f Dockerfile ]; then
             echo "has_dockerfile=true" >> $GITHUB_OUTPUT
           else
             echo "has_dockerfile=false" >> $GITHUB_OUTPUT
             echo "No Dockerfile found — skipping Docker build steps"
           fi
+
+      - name: Show Dockerfile contents for debug
+        if: steps.check_docker.outputs.has_dockerfile == 'true'
+        run: |
+          echo '--- Dockerfile ---'
+          cat Dockerfile
+          echo '--- end Dockerfile ---'
 
       - name: Set up Docker Buildx
         if: steps.check_docker.outputs.has_dockerfile == 'true'
@@ -122,6 +131,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: false
           load: true
           tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
