@@ -322,96 +322,19 @@ jobs:
     name: 🔴 Notify Slack — Failure
     runs-on: ubuntu-latest
     needs: [lint, test, gitleaks, build, security, report, deploy]
-    if: failure() && (secrets.SLACK_WEBHOOK_URL != '')
+    if: failure()
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     permissions:
       contents: read
 
     steps:
       - name: Slack — alerte échec
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1.27.0
         with:
+          webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
           payload: |
             {
-              "text": "🔴 Pipeline échoué — ${{ github.repository }}",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": { "type": "plain_text", "text": "🔴 Échec du pipeline CI/CD" }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    { "type": "mrkdwn", "text": "*Repo :*\n${{ github.repository }}" },
-                    { "type": "mrkdwn", "text": "*Branche :*\n`${{ github.ref_name }}`" },
-                    { "type": "mrkdwn", "text": "*Commit :*\n`${{ github.sha }}`" },
-                    { "type": "mrkdwn", "text": "*Déclenché par :*\n${{ github.actor }}" }
-                  ]
-                },
-                {
-                  "type": "actions",
-                  "elements": [{
-                    "type": "button",
-                    "text": { "type": "plain_text", "text": "Voir les logs" },
-                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-                    "style": "danger"
-                  }]
-                }
-              ]
+              "text": "🔴 Pipeline échoué — ${{ github.repository }}"
             }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
-
-  # ─────────────────────────────────────────────────────────────────
-  # JOB 9 — Notification Slack succès (NOUVEAU)
-  # ─────────────────────────────────────────────────────────────────
-  notify-success:
-    name: ✅ Notify Slack — Success
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: success() && github.ref == 'refs/heads/main' && (secrets.SLACK_WEBHOOK_URL != '')
-    permissions:
-      contents: read
-
-    steps:
-      - name: Slack — confirmation déploiement
-        uses: slackapi/slack-github-action@v1.27.0
-        with:
-          payload: |
-            {
-              "text": "✅ Déploiement réussi — ${{ github.repository }}",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": { "type": "plain_text", "text": "✅ Déploiement en production réussi" }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    { "type": "mrkdwn", "text": "*Repo :*\n${{ github.repository }}" },
-                    { "type": "mrkdwn", "text": "*Branche :*\n`${{ github.ref_name }}`" },
-                    { "type": "mrkdwn", "text": "*Commit :*\n`${{ github.sha }}`" },
-                    { "type": "mrkdwn", "text": "*App :*\n${{ vars.APP_URL }}" }
-                  ]
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": { "type": "plain_text", "text": "Ouvrir l'app" },
-                      "url": "${{ vars.APP_URL }}",
-                      "style": "primary"
-                    },
-                    {
-                      "type": "button",
-                      "text": { "type": "plain_text", "text": "Voir le run" },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
