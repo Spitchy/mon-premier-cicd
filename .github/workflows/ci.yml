@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Challenge ultime — utilisation de la composite action
       - name: Setup Node.js (via composite action)
@@ -79,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout (historique complet pour gitleaks)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0   # obligatoire pour scanner tout l'historique git
 
@@ -101,7 +101,7 @@ jobs:
       has_dockerfile: ${{ steps.check_docker.outputs.has_dockerfile }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check Dockerfile
         id: check_docker
@@ -142,7 +142,7 @@ jobs:
       security-events: write   # requis pour uploader le SARIF dans Security Tab
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Rebuild image pour Trivy
         # Les artefacts Docker ne persistent pas entre jobs — on rebuild
@@ -190,7 +190,7 @@ jobs:
     if: always()
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Télécharger tous les rapports de couverture
         uses: actions/download-artifact@v4
@@ -250,7 +250,7 @@ jobs:
       deployments: write   # requis pour GitHub Deployments API
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Créer un GitHub Deployment (statut "in_progress")
         uses: bobheadxi/deployments@v1
