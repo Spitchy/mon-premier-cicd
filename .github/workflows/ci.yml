@@ -174,6 +174,7 @@ jobs:
           severity: 'HIGH,CRITICAL'
 
       - name: Trivy — format SARIF (upload Security Tab)
+        id: trivy_sarif
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: '${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}'
@@ -182,9 +183,21 @@ jobs:
           exit-code: '1'       # bloque le pipeline si CVE HIGH/CRITICAL
           severity: 'HIGH,CRITICAL'
 
+      - name: Check SARIF output
+        id: check_sarif
+        if: always()
+        run: |
+          if [ -f trivy-results.sarif ]; then
+            echo "file_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "file_exists=false" >> $GITHUB_OUTPUT
+            echo "SARIF output not found"
+            ls -la
+          fi
+
       - name: Upload rapport SARIF → GitHub Security Tab
+        if: always() && steps.check_sarif.outputs.file_exists == 'true'
         uses: github/codeql-action/upload-sarif@v3
-        if: always()   # uploader même si Trivy a bloqué le step précédent
         with:
           sarif_file: 'trivy-results.sarif'
           category: 'trivy-docker-scan'
