@@ -331,7 +331,7 @@ jobs:
     steps:
       - name: Slack — alerte échec
         if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        uses: slackapi/slack-github-action@v1.27.0
+        uses: slackapi/slack-github-action@v3.0.3
         with:
           webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
           payload: |
